@@ -16,6 +16,7 @@ from pandas import DataFrame as df
 path_to_raytraces = "data/"
 
 st.title("The Accretion Disk")
+st.title("fix this doc text")
 st.write("This is a toy GUI which uses Amoeba as described in Best et al. 2025, designed to explore how the flux distribution of the accretion disk and broad line region (BLR) is related to various parameters.")
 st.write("The accretion disk model stems from the Shakura-Sunyaev thin-disk model which includes general relatvisitc (GR) corrections.")
 st.write("Additions to this model are the lamp-post heating term as outlined in Cackett et al. 2007 and the Disk-wind term from Yong et al. 2019.")
@@ -37,8 +38,11 @@ edd_ratio = left_col.slider("Eddington ratio", min_value=0.01, max_value=0.3, st
 wind_beta = right_col.slider("wind strength", min_value=0.0, max_value=0.8, step=0.01, value=0.0)
 
 axis_range = right_col.slider(r"axis range [$r_{\rm{g}}$]", min_value=10, max_value=1000, step=10, value=100)
-apply_gr = st.toggle("apply GR")
-wavelength = st.slider("observer frame wavelength range [nm]", min_value=150, max_value=2000, step=5, value=(400, 600))
+flare_offset = left_col.slider(r"source offset [$r_{\rm{g}}$]", min_value=0, max_value=1000, step=5, value=0)
+angle_offset = right_col.slider(r"phi offset [deg.]", min_value=0, max_value=360, step=1, value=0)
+apply_gr = left_col.toggle("apply GR")
+use_nt = right_col.toggle("use Novikov-Thorne")
+wavelength = st.slider("observer frame wavelength range [nm]", min_value=150, max_value=2000, step=5, value=400)
 
 # grab the GR-ray trace
 fname = path_to_raytraces+"RayTrace"+str(int(inclination)).zfill(2)+".fits"
@@ -47,15 +51,11 @@ with fits.open(fname) as f:
     phi_map = f[1].data
     g_map = f[2].data
     header = f[0].header
-    
-# work on conversion to mags
-min_wavelength = np.min(wavelength) * 10**-9
-max_wavelength = np.max(wavelength) * 10**-9
-min_frequency = 3e8 / max_wavelength
-max_frequency = 3e8 / min_wavelength
-delta_freq = abs(max_frequency - min_frequency)
-delta_lam = abs(max_wavelength - min_wavelength)
 
+if use_nt:
+    temp_prof = "NT"
+else:
+    temp_prof = "SS"
 
 # do some amoeba construction
 acc_disk_dict = create_maps(
@@ -65,7 +65,7 @@ acc_disk_dict = create_maps(
     inclination_angle=inclination,
     resolution=np.size(r_map, 0),
     eddington_ratio=edd_ratio,
-    visc_temp_prof="NT",
+    visc_temp_prof=temp_prof,
     temp_beta=wind_beta
 )
 
@@ -75,30 +75,38 @@ if apply_gr:
     acc_disk_dict['phi_array'] = phi_map
     acc_disk_dict['g_array'] = g_map
     grav_rad = calculate_gravitational_radius(10**mexp)
-    t_map = accretion_disk_temperature(r_map * grav_rad, 6.0 * grav_rad, 10**mexp, edd_ratio, beta=wind_beta, visc_temp_prof="NT")
+    t_map = accretion_disk_temperature(r_map * grav_rad, 6.0 * grav_rad, 10**mexp, edd_ratio, beta=wind_beta, visc_temp_prof=temp_prof)
     acc_disk_dict['temp_array'] = t_map
 
 
 disk = AccretionDisk(**acc_disk_dict)
 
-emission_array = disk.calculate_surface_intensity_map(np.mean(wavelength))
-flux_array = emission_array.flux_array
-total_flux = emission_array.total_flux
-flux_exp = round(np.log10(total_flux), 0)
-X, Y = emission_array.get_plotting_axes()
 
+response_function = disk.construct_accretion_disk_transfer_function(
+    wavelength, 
+    axis_offset_in_gravitational_radii=flare_offset, 
+    angle_offset_in_degrees=angle_offset
+)
 
-lum_dist = disk.lum_dist
-approx_ab_mag = round(-2.5 * np.log10(total_flux / (4 * np.pi * lum_dist**2) * delta_lam / delta_freq * 1000) - 48.6, 1)
+response_map, time_lags = disk.construct_accretion_disk_transfer_function(
+    wavelength, 
+    axis_offset_in_gravitational_radii=flare_offset, 
+    angle_offset_in_degrees=angle_offset,
+    return_response_array_and_lags=True
+)
 
-title_string = "emitted flux density: "+str(total_flux)[:4]+"e"+str(flux_exp)[:-2]+" W/m"+r", AB mag $\approx$"+str(approx_ab_mag)
+flux_array = disk.calculate_surface_intensity_map(wavelength)
+
+lag_contours = np.linspace(0, 2000, 11)
+
+X, Y = flux_array.get_plotting_axes()
 
 fig, ax = plt.subplots(figsize=(8, 6))
-contours = ax.contourf(X, Y, (flux_array), 50)
-cbar = plt.colorbar(contours, ax=ax, label=r'flux density [W/m$^{2}$/m]')
+ax.contourf(X, Y, np.log10(response_map), 20)
+lag_contours = ax.contour(X, Y, time_lags, lag_contours, colors='white', linewidths=0.5)
+
 ax.set_xlabel(r"x [$r_{\rm{g}}$]")
 ax.set_ylabel(r"y [$r_{\rm{g}}$]")
-ax.set_title(title_string)
 ax.set_xlim(-axis_range, axis_range)
 ax.set_ylim(-axis_range, axis_range)
 ax.set_aspect(1)
