@@ -10,7 +10,10 @@ from amoeba.Util.util import (
 import matplotlib.pyplot as plt
 import streamlit as st
 from astropy.io import fits
+import astropy.constants as const
+import astropy.units as u
 from pandas import DataFrame as df
+
 
 
 path_to_raytraces = "data/"
@@ -95,15 +98,23 @@ response_map, time_lags = disk.construct_accretion_disk_transfer_function(
     return_response_array_and_lags=True
 )
 
+lags_in_days = time_lags * disk.rg / (const.c.to(u.m/u.day))
+
 flux_array = disk.calculate_surface_intensity_map(wavelength)
 
 lag_contours = np.linspace(0, 2000, 11)
+lag_contours_in_days = np.linspace(
+    0, 
+    np.max(lags_in_days)//10 * 10,
+    np.max(lags_in_days)//10 + 1
+)
 
 X, Y = flux_array.get_plotting_axes()
 
 fig, ax = plt.subplots(figsize=(8, 6))
 ax.contourf(X, Y, np.log10(response_map), 20)
-lag_contours = ax.contour(X, Y, time_lags, lag_contours, colors='white', linewidths=0.5)
+ax.contour(X, Y, time_lags, lag_contours, colors='white', linewidths=0.5)
+ax.contour(X, Y, lags_in_days, lag_contours_in_days, colors='white', alpha=0.7, linewidths=0.5,linestyles='dashed')
 
 ax.set_xlabel(r"x [$r_{\rm{g}}$]")
 ax.set_ylabel(r"y [$r_{\rm{g}}$]")
@@ -115,12 +126,14 @@ ax.set_aspect(1)
 st.write(fig)
 
 fig2, ax2 = plt.subplots(figsize=(8, 3))
-ax2.plot(X[0, :], flux_array[500, :])
-ax2.set_xlim(-axis_range, axis_range)
-ax2.set_xlabel(r"x [$r_{\rm{g}}$]")
-ax2.set_ylabel(r"flux density across center [W/m$^{2}$/m]")
+
+ax2.plot(response_function)
+ax2.set_xlabel(r"$\tau$ [$r_{\rm{g}}$]")
+ax2.set_ylabel(r"$\Psi$ [arb.]")
 
 st.write(fig2)
+
+'''
 
 @st.fragment()
 def save_data(current_data, current_metadata, my_key):
@@ -229,4 +242,4 @@ st.write("rest frame emission line represents the wavelength of the BLR if it wa
 
 
 
-
+'''
