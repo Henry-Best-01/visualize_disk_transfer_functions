@@ -40,7 +40,7 @@ inclination = left_col.slider("inclination angle [deg.]", min_value=2, max_value
 edd_ratio = left_col.slider("Eddington ratio", min_value=0.01, max_value=0.3, step=0.01, value=0.10)
 wind_beta = right_col.slider("wind strength", min_value=0.0, max_value=0.8, step=0.01, value=0.0)
 
-axis_range = right_col.slider(r"axis range [$r_{\rm{g}}$]", min_value=10, max_value=1000, step=10, value=100)
+axis_range = right_col.slider(r"axis range [$r_{\rm{g}}$]", min_value=10, max_value=1000, step=10, value=1000)
 flare_offset = left_col.slider(r"source offset [$r_{\rm{g}}$]", min_value=0, max_value=1000, step=5, value=0)
 angle_offset = right_col.slider(r"phi offset [deg.]", min_value=0, max_value=360, step=1, value=0)
 apply_gr = left_col.toggle("apply GR")
@@ -91,6 +91,19 @@ response_function = disk.construct_accretion_disk_transfer_function(
     angle_offset_in_degrees=angle_offset
 )
 
+mean_response = np.sum(response_function * np.linspace(
+    0,
+    len(response_function) - 1,
+    len(response_function)
+)) / np.sum(response_function)
+
+centroid_mask = response_function > 0.5 * np.max(response_function)
+centroid_mean = np.sum(response_function * np.linspace(
+    0,
+    len(response_function) - 1,
+    len(response_function)
+) * centroid_mask) / np.sum(response_function * centroid_mask)
+
 response_map, time_lags = disk.construct_accretion_disk_transfer_function(
     wavelength, 
     axis_offset_in_gravitational_radii=flare_offset, 
@@ -98,15 +111,29 @@ response_map, time_lags = disk.construct_accretion_disk_transfer_function(
     return_response_array_and_lags=True
 )
 
-lags_in_days = time_lags * disk.rg / (const.c.to(u.m/u.day))
+lags_in_days = (time_lags * disk.rg / (const.c.to(u.m/u.day))).value * (1 + redshift)
+tau_ax_in_days = np.linspace(
+    0,
+    np.max(lags_in_days),
+    len(response_function)
+)
 
 flux_array = disk.calculate_surface_intensity_map(wavelength)
+
+spacing = 0.1
+if np.max(lags_in_days) > 1:
+    spacing = 1
+if np.max(lags_in_days) > 10:
+    spacing = 10
+if np.max(lags_in_days) > 100:
+    spacing = 100
+
 
 lag_contours = np.linspace(0, 2000, 11)
 lag_contours_in_days = np.linspace(
     0, 
-    np.max(lags_in_days)//10 * 10,
-    np.max(lags_in_days)//10 + 1
+    np.max(lags_in_days)//spacing * spacing,
+    int(np.max(lags_in_days)//spacing + 1)
 )
 
 X, Y = flux_array.get_plotting_axes()
@@ -116,6 +143,7 @@ ax.contourf(X, Y, np.log10(response_map), 20)
 ax.contour(X, Y, time_lags, lag_contours, colors='white', linewidths=0.5)
 ax.contour(X, Y, lags_in_days, lag_contours_in_days, colors='white', alpha=0.7, linewidths=0.5,linestyles='dashed')
 
+ax.set_title(f"dashed contours placed every {spacing} day(s) \n solid contours placed every 200" + r" $r_{\rm{g}}$")
 ax.set_xlabel(r"x [$r_{\rm{g}}$]")
 ax.set_ylabel(r"y [$r_{\rm{g}}$]")
 ax.set_xlim(-axis_range, axis_range)
@@ -125,13 +153,45 @@ ax.set_aspect(1)
 
 st.write(fig)
 
-fig2, ax2 = plt.subplots(figsize=(8, 3))
 
-ax2.plot(response_function)
-ax2.set_xlabel(r"$\tau$ [$r_{\rm{g}}$]")
-ax2.set_ylabel(r"$\Psi$ [arb.]")
 
-st.write(fig2)
+
+
+
+@st.fragment()
+def update_tau_ax():
+
+    fig2, ax2 = plt.subplots(figsize=(8, 3))
+
+    ax2.plot(response_function)
+    ax2.set_xlabel(r"$\tau$ [$r_{\rm{g}}$]")
+    ax2.set_ylabel(r"$\Psi$ [arb.]")
+
+    
+    x_lim_slider = st.slider(
+        r"max time lag [$r_{\rm{g}}$]",
+        min_value=0,
+        max_value=2000,
+        step=1,
+        value=200,
+    )
+    ax2_twin = ax2.twiny()
+    ax2_twin.plot(tau_ax_in_days, response_function)
+    value_in_days = x_lim_slider * disk.rg / (const.c.to(u.m/u.day)).value * (1 + redshift)
+    
+    ax2_twin.set_xlabel(r"$\tau$ [day]")
+
+    ax2.plot([mean_response, mean_response], [0, response_function[int(mean_response)]], '--', color='grey', alpha=0.7, label="total mean")
+    ax2.plot([centroid_mean, centroid_mean], [0, response_function[int(centroid_mean)]], '-.', color='black', alpha=0.7, label="centroid mean")
+    
+    ax2.set_xlim(-1, x_lim_slider)
+    ax2_twin.set_xlim(
+        -disk.rg / (const.c.to(u.m/u.day)).value * (1 + redshift),
+        value_in_days
+    )
+    ax2.legend()
+    st.write(fig2)
+update_tau_ax()
 
 '''
 
