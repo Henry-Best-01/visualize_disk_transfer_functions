@@ -28,9 +28,9 @@ A simple Streamlit app showing how various parameters impact the transfer functi
 
 4. In "streamlit_app.py", make the following changes to lines:
    
-   15 - path_to_raytraces = "<Path_to_your_downloaded_ray_traces>"
+   15: path_to_raytraces = "<Path_to_your_downloaded_ray_traces>"
    
-   24 - inclination = left_col.slider("inclination angle [deg.]", min_value=0, max_value=89, step=1, value=20)
+   24: inclination = left_col.slider("inclination angle [deg.]", min_value=0, max_value=89, step=1, value=20)
 
 5. Follow instructions for "How to run it on your own machine" above.
 
