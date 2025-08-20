@@ -12,15 +12,14 @@ import astropy.constants as const
 import astropy.units as u
 
 
-
 path_to_raytraces = "data/"
 
-st.title("The Accretion Disk")
-st.title("fix this doc text")
-st.write("This is a toy GUI which uses Amoeba as described in Best et al. 2025, designed to explore how the flux distribution of the accretion disk and broad line region (BLR) is related to various parameters.")
+st.title("The reverberating Accretion Disk")
+st.write("This is a toy GUI which uses Amoeba as described in Best et al. 2025 to compute the accretion disk's response function using the lamp-post model.")
 st.write("The accretion disk model stems from the Shakura-Sunyaev thin-disk model which includes general relatvisitc (GR) corrections.")
 st.write("Additions to this model are the lamp-post heating term as outlined in Cackett et al. 2007 and the Disk-wind term from Yong et al. 2019.")
 st.write("GR ray tracing is computed with Sim5 as described in Bursa 2017.")
+st.write("References:")
 col_stack = st.columns(5)
 col_stack[0].link_button("Best et al., 2025", "https://ui.adsabs.harvard.edu/abs/2025MNRAS.539.1269B/abstract")
 col_stack[1].link_button("Shakura + Sunyaev, 1973", "https://ui.adsabs.harvard.edu/abs/1973A%26A....24..337S/abstract")
@@ -29,10 +28,8 @@ col_stack[3].link_button("Yong et al., 2019", "https://ui.adsabs.harvard.edu/abs
 col_stack[4].link_button("Bursa, 2017", "https://ui.adsabs.harvard.edu/abs/2017bhns.work....7B/abstract")
 
 
-
-
-
-@st.fragment
+## The definition of the disk can't be in a fragment, since changing it 
+# means we need to recalculate everything later. 
 def define_disk():
     left_col, right_col = st.columns(2)
     mexp = left_col.slider("mass exponent", min_value=7.0, max_value=10.0, step=0.1, value=8.0)
@@ -42,6 +39,11 @@ def define_disk():
     redshift = right_col.slider("redshift", min_value=0.0, max_value=9.0, step=0.1, value=1.0)
     apply_gr = left_col.toggle("apply GR")
     use_nt = right_col.toggle("use Novikov-Thorne")
+    if not apply_gr:
+        disk_flaring = st.slider("disk flaring", min_value=0, max_value=45, step=1, value=0)
+    else:
+        st.write("disk flaring is disabled due to its incompatibility with the GR ray traced maps")
+        disk_flaring = 0
     param_bundle = [mexp, inclination, edd_ratio, wind_beta, redshift]
 
     # grab the GR-ray trace
@@ -77,14 +79,17 @@ def define_disk():
         grav_rad = calculate_gravitational_radius(10**mexp)
         t_map = accretion_disk_temperature(r_map * grav_rad, 6.0 * grav_rad, 10**mexp, edd_ratio, beta=wind_beta, visc_temp_prof=temp_prof)
         acc_disk_dict['temp_array'] = t_map
+    else:
+        acc_disk_dict['height_array'] = r_map * np.tan(disk_flaring * np.pi / 180)
     disk = AccretionDisk(**acc_disk_dict)
+
     return disk, param_bundle
+
 disk, param_bundle = define_disk()
 mexp, inclination, edd_ratio, wind_beta, redshift = param_bundle
 
-st.write(mexp)
 
-
+# This can be in a fragment, but it needs up also update the figures
 @st.fragment
 def define_transfer_function(disk):
     left_col, right_col = st.columns(2)
@@ -116,52 +121,43 @@ def define_transfer_function(disk):
 
     flux_array = disk.calculate_surface_intensity_map(wavelength)
 
-    return response_function, mean_response, centroid_mean, response_map, time_lags, flux_array
+    lags_in_days = (time_lags * disk.rg / (const.c.to(u.m/u.day))).value * (1 + redshift)
+    tau_ax_in_days = np.linspace(
+        0,
+        np.max(lags_in_days),
+        len(response_function)
+    )
+    spacing = 0.1
+    if np.max(lags_in_days) > 1:
+        spacing = 1
+    if np.max(lags_in_days) > 10:
+        spacing = 10
+    if np.max(lags_in_days) > 100:
+        spacing = 100
 
+    axis_range = st.slider(r"axis range [$r_{\rm{g}}$]", min_value=10, max_value=1000, value=1000)
 
+    lag_contours = np.linspace(0, 2000, 11)
+    lag_contours_in_days = np.linspace(
+        0, 
+        np.max(lags_in_days)//spacing * spacing,
+        int(np.max(lags_in_days)//spacing + 1)
+    )
 
-response_function, mean_response, centroid_mean, response_map, time_lags, flux_array = define_transfer_function(disk)
-axis_range = st.slider(r"axis range [$r_{\rm{g}}$]", min_value=10, max_value=1000, step=10, value=1000)
+    X, Y = flux_array.get_plotting_axes()
 
-lags_in_days = (time_lags * disk.rg / (const.c.to(u.m/u.day))).value * (1 + redshift)
-tau_ax_in_days = np.linspace(
-    0,
-    np.max(lags_in_days),
-    len(response_function)
-)
-spacing = 0.1
-if np.max(lags_in_days) > 1:
-    spacing = 1
-if np.max(lags_in_days) > 10:
-    spacing = 10
-if np.max(lags_in_days) > 100:
-    spacing = 100
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.contourf(X, Y, np.log10(response_map), 20)
+    ax.contour(X, Y, time_lags, lag_contours, colors='white', linewidths=0.5)
+    ax.contour(X, Y, lags_in_days, lag_contours_in_days, colors='white', alpha=0.7, linewidths=0.5,linestyles='dashed')
 
-lag_contours = np.linspace(0, 2000, 11)
-lag_contours_in_days = np.linspace(
-    0, 
-    np.max(lags_in_days)//spacing * spacing,
-    int(np.max(lags_in_days)//spacing + 1)
-)
-
-X, Y = flux_array.get_plotting_axes()
-
-fig, ax = plt.subplots(figsize=(8, 6))
-ax.contourf(X, Y, np.log10(response_map), 20)
-ax.contour(X, Y, time_lags, lag_contours, colors='white', linewidths=0.5)
-ax.contour(X, Y, lags_in_days, lag_contours_in_days, colors='white', alpha=0.7, linewidths=0.5,linestyles='dashed')
-
-ax.set_title(f"dashed contours placed every {spacing} day(s) \n solid contours placed every 200" + r" $r_{\rm{g}}$")
-ax.set_xlabel(r"x [$r_{\rm{g}}$]")
-ax.set_ylabel(r"y [$r_{\rm{g}}$]")
-ax.set_xlim(-axis_range, axis_range)
-ax.set_ylim(-axis_range, axis_range)
-ax.set_aspect(1)
-st.write(fig)
-
-
-@st.fragment()
-def update_tau_ax():
+    ax.set_title(f"dashed contours placed every {spacing} day(s) \n solid contours placed every 200" + r" $r_{\rm{g}}$")
+    ax.set_xlabel(r"x [$r_{\rm{g}}$]")
+    ax.set_ylabel(r"y [$r_{\rm{g}}$]")
+    ax.set_xlim(-axis_range, axis_range)
+    ax.set_ylim(-axis_range, axis_range)
+    ax.set_aspect(1)
+    st.write(fig)
 
     fig2, ax2 = plt.subplots(figsize=(8, 3))
 
@@ -193,9 +189,8 @@ def update_tau_ax():
     )
     ax2.legend()
     st.write(fig2)
-update_tau_ax()
 
-
+define_transfer_function(disk)
 
 
 
